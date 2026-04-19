@@ -1,110 +1,72 @@
 import Company from '../models/Company.js';
+import Student from '../models/Student.js';
 
-// Create a new company
 export const createCompany = async (req, res) => {
   try {
-    const { companyName, eligibilityCGPA, maxArrearLimit, jobRole, packageOffered, website, industry, location, contactPerson, contactEmail, contactPhone, description } = req.body;
-
-    // Check if company already exists
-    const existingCompany = await Company.findOne({ companyName });
-    if (existingCompany) {
-      return res.status(400).json({ message: 'Company already registered' });
-    }
-
-    const company = new Company({
-      companyName,
-      eligibilityCGPA,
-      maxArrearLimit,
-      jobRole: jobRole || [],
-      packageOffered: packageOffered || [],
-      website,
-      industry,
-      location,
-      contactPerson,
-      contactEmail,
-      contactPhone,
-      description,
-    });
-
-    const savedCompany = await company.save();
-    res.status(201).json({ message: 'Company created successfully', company: savedCompany });
-  } catch (error) {
-    res.status(500).json({ message: 'Error creating company', error: error.message });
+    const company = await Company.create(req.body);
+    res.status(201).json({ message: 'Company drive created successfuly', company });
+  } catch (err) {
+    res.status(500).json({ message: 'Error creating company', error: err.message });
   }
 };
 
-// Get all companies
-export const getAllCompanies = async (req, res) => {
+export const getCompanies = async (req, res) => {
   try {
-    const companies = await Company.find();
-    res.status(200).json({ companies });
-  } catch (error) {
-    res.status(500).json({ message: 'Error fetching companies', error: error.message });
+    const companies = await Company.find({ isActive: true }).sort({ date: 1 });
+    res.json({ companies });
+  } catch (err) {
+    res.status(500).json({ message: 'Error fetching companies', error: err.message });
   }
 };
 
-// Get company by ID
-export const getCompanyById = async (req, res) => {
+export const registerForDrive = async (req, res) => {
   try {
-    const { companyId } = req.params;
+    const { companyId, studentId } = req.body;
+    
+    // Check if both exist
     const company = await Company.findById(companyId);
-
-    if (!company) {
-      return res.status(404).json({ message: 'Company not found' });
+    let student = await Student.findOne({ userId: studentId });
+    if (!student) student = await Student.findById(studentId); // Try direct ID if not found by userId
+    
+    if (!company || !student) return res.status(404).json({ message: 'Company or Student record not found' });
+    
+    // Toggle registration status (register if not registered, unregister if already)
+    const alreadyRegistered = student.registeredCompanies.includes(companyId);
+    
+    if (alreadyRegistered) {
+      // Unregister
+      student.registeredCompanies = student.registeredCompanies.filter(c => c.toString() !== companyId);
+      company.registrations = company.registrations.filter(s => s.toString() !== studentId);
+      student.placementStatus = 'not_applied';
+    } else {
+      // Check eligibility (optional - can also let everyone register but highlight status)
+      if (student.cgpa < company.criteria.minCGPA) {
+        return res.status(403).json({ message: 'Does not meet CGPA criteria' });
+      }
+      
+      student.registeredCompanies.push(companyId);
+      company.registrations.push(studentId);
+      student.placementStatus = 'applied';
     }
-
-    res.status(200).json({ company });
-  } catch (error) {
-    res.status(500).json({ message: 'Error fetching company', error: error.message });
+    
+    await student.save();
+    await company.save();
+    
+    res.json({ 
+      message: alreadyRegistered ? 'Registration cancelled' : 'Registered successfully', 
+      isRegistered: !alreadyRegistered 
+    });
+  } catch (err) {
+    res.status(500).json({ message: 'Registration failed', error: err.message });
   }
 };
 
-// Update company
-export const updateCompany = async (req, res) => {
-  try {
-    const { companyId } = req.params;
-    const updates = req.body;
-
-    const company = await Company.findByIdAndUpdate(companyId, updates, { new: true, runValidators: true });
-
-    if (!company) {
-      return res.status(404).json({ message: 'Company not found' });
-    }
-
-    res.status(200).json({ message: 'Company updated successfully', company });
-  } catch (error) {
-    res.status(500).json({ message: 'Error updating company', error: error.message });
-  }
-};
-
-// Delete company
 export const deleteCompany = async (req, res) => {
-  try {
-    const { companyId } = req.params;
-    const company = await Company.findByIdAndDelete(companyId);
-
-    if (!company) {
-      return res.status(404).json({ message: 'Company not found' });
+    try {
+      const company = await Company.findByIdAndDelete(req.params.id);
+      if (!company) return res.status(404).json({ message: 'Company not found' });
+      res.json({ message: 'Company drive deleted' });
+    } catch (err) {
+      res.status(500).json({ message: 'Error deleting company', error: err.message });
     }
-
-    res.status(200).json({ message: 'Company deleted successfully' });
-  } catch (error) {
-    res.status(500).json({ message: 'Error deleting company', error: error.message });
-  }
-};
-
-// Get companies by eligibility criteria
-export const getCompaniesByEligibility = async (req, res) => {
-  try {
-    const { minCGPA, maxArrears } = req.query;
-
-    const filter = {};
-    if (minCGPA) filter.eligibilityCGPA = { $lte: parseFloat(minCGPA) };
-    if (maxArrears) filter.maxArrearLimit = { $gte: parseInt(maxArrears) };
-
-    const companies = await Company.find(filter);
-    res.status(200).json({ companies });
-  } catch (error) {
-    res.status(500).json({ message: 'Error fetching eligible companies', error: error.message });
-  }
-};
+  };

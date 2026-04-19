@@ -1,152 +1,86 @@
+import jwt from 'jsonwebtoken';
 import User from '../models/User.js';
-import { generateToken, validateEmail } from '../utils/helpers.js';
-import { findUserByEmail, createUser as mockCreateUser, findUserById } from '../config/mockDB.js';
-import bcryptjs from 'bcryptjs';
+import Student from '../models/Student.js';
 
-// Flag to track if MongoDB is available
-let isMongoDBConnected = false;
-
-export const setMongoDBStatus = (status) => {
-  isMongoDBConnected = status;
+const generateToken = (userId) => {
+  return jwt.sign({ userId }, process.env.JWT_SECRET || 'pspa_secret_key_2024', { expiresIn: '7d' });
 };
 
 export const register = async (req, res) => {
   try {
-    const { name, email, password, role } = req.body;
-
+    const { name, email, password, role, rollNumber, batch } = req.body;
     if (!name || !email || !password) {
-      return res.status(400).json({ message: 'All fields are required' });
+      return res.status(400).json({ message: 'Name, email, and password are required' });
+    }
+    const existing = await User.findOne({ email });
+    if (existing) return res.status(409).json({ message: 'Email already registered' });
+
+    const user = await User.create({ name, email, password, role: role || 'student' });
+    
+    // Auto-link/create Student record for student users
+    if (user.role === 'student') {
+        let student = await Student.findOne({ email: user.email });
+        if (student) {
+            student.userId = user._id;
+            if (rollNumber) student.rollNumber = rollNumber;
+            if (batch) student.batch = batch;
+            await student.save();
+        } else {
+            await Student.create({ 
+              userId: user._id, 
+              name: user.name, 
+              email: user.email, 
+              rollNumber: rollNumber || '', 
+              batch: batch || '2024' 
+            });
+        }
     }
 
-    if (!validateEmail(email)) {
-      return res.status(400).json({ message: 'Invalid email format' });
-    }
-
-    // Try to use MongoDB first, fall back to mock DB
-    try {
-      let existingUser = await User.findOne({ email });
-      if (existingUser) {
-        return res.status(400).json({ message: 'Email already registered' });
-      }
-
-      const user = new User({
-        name,
-        email,
-        password,
-        role: role || 'student',
-      });
-
-      await user.save();
-      const token = generateToken(user);
-
-      return res.status(201).json({
-        message: 'User registered successfully',
-        user: {
-          id: user._id,
-          name: user.name,
-          email: user.email,
-          role: user.role,
-        },
-        token,
-      });
-    } catch (mongoError) {
-      // Fall back to mock DB
-      let existingUser = findUserByEmail(email);
-      if (existingUser) {
-        return res.status(400).json({ message: 'Email already registered' });
-      }
-
-      const hashedPassword = await bcryptjs.hash(password, 10);
-      const user = mockCreateUser({
-        name,
-        email,
-        password: hashedPassword,
-        role: role || 'student',
-        isActive: true,
-      });
-
-      const token = generateToken(user);
-
-      return res.status(201).json({
-        message: 'User registered successfully (Demo Mode)',
-        user: {
-          id: user._id,
-          name: user.name,
-          email: user.email,
-          role: user.role,
-        },
-        token,
-      });
-    }
-  } catch (error) {
-    console.error('Registration error:', error);
-    res.status(500).json({ message: 'Internal server error', error: error.message });
+    const token = generateToken(user._id);
+    res.status(201).json({
+      message: 'User registered successfully',
+      token,
+      user: { id: user._id, name: user.name, email: user.email, role: user.role }
+    });
+  } catch (err) {
+    res.status(500).json({ message: 'Registration failed', error: err.message });
   }
 };
 
 export const login = async (req, res) => {
   try {
     const { email, password } = req.body;
+    if (!email || !password) return res.status(400).json({ message: 'Email and password required' });
 
-    if (!email || !password) {
-      return res.status(400).json({ message: 'Email and password are required' });
+    const user = await User.findOne({ email });
+    if (!user || !(await user.comparePassword(password))) {
+      return res.status(401).json({ message: 'your passwrod that are used found' });
+    }
+    if (!user.isActive) return res.status(403).json({ message: 'Account is deactivated' });
+
+    const token = generateToken(user._id);
+
+    // Self-healing: Ensure student record exists if role is student
+    if (user.role === 'student') {
+        const student = await Student.findOne({ $or: [{ userId: user._id }, { email: user.email }] });
+        if (!student) {
+            await Student.create({ userId: user._id, name: user.name, email: user.email });
+        } else if (!student.userId) {
+            student.userId = user._id;
+            await student.save();
+        }
     }
 
-    // Try MongoDB first, fall back to mock DB
-    try {
-      const user = await User.findOne({ email });
-      if (!user) {
-        return res.status(401).json({ message: 'Invalid credentials' });
-      }
-
-      const isPasswordValid = await user.matchPassword(password);
-      if (!isPasswordValid) {
-        return res.status(401).json({ message: 'Invalid credentials' });
-      }
-
-      const token = generateToken(user);
-
-      return res.json({
-        message: 'Login successful',
-        user: {
-          id: user._id,
-          name: user.name,
-          email: user.email,
-          role: user.role,
-        },
-        token,
-      });
-    } catch (mongoError) {
-      // Fall back to mock DB
-      const user = findUserByEmail(email);
-      if (!user) {
-        return res.status(401).json({ message: 'Invalid credentials' });
-      }
-
-      const isPasswordValid = await bcryptjs.compare(password, user.password);
-      if (!isPasswordValid) {
-        return res.status(401).json({ message: 'Invalid credentials' });
-      }
-
-      const token = generateToken(user);
-
-      return res.json({
-        message: 'Login successful (Demo Mode)',
-        user: {
-          id: user._id,
-          name: user.name,
-          email: user.email,
-          role: user.role,
-        },
-        token,
-      });
-    }
-  } catch (error) {
-    console.error('Login error:', error);
-    res.status(500).json({ message: 'Internal server error', error: error.message });
+    res.json({
+      message: 'Login successful',
+      token,
+      user: { id: user._id, name: user.name, email: user.email, role: user.role }
+    });
+  } catch (err) {
+    res.status(500).json({ message: 'Login failed', error: err.message });
   }
 };
 
-export const logout = (req, res) => {
-  res.json({ message: 'Logout successful' });
+export const getMe = async (req, res) => {
+  res.json({ user: { id: req.user._id, name: req.user.name, email: req.user.email, role: req.user.role } });
 };

@@ -1,55 +1,20 @@
 import mongoose from 'mongoose';
 
-const CompanySchema = new mongoose.Schema({
-  companyId: {
-    type: String,
-    unique: true,
-    default: () => new mongoose.Types.ObjectId().toString().slice(0, 8).toUpperCase(),
+const companySchema = new mongoose.Schema({
+  name: { type: String, required: true },
+  role: { type: String, required: true }, // e.g., 'Software Engineer'
+  description: { type: String, default: '' },
+  criteria: {
+    minCGPA: { type: Number, default: 0 },
+    minSkills: [{ type: String }],
+    batch: [{ type: String }], // e.g., ['2024', '2025']
   },
-  companyName: {
-    type: String,
-    required: true,
-    unique: true,
-  },
-  eligibilityCGPA: {
-    type: Number,
-    min: 0,
-    max: 10,
-  },
-  maxArrearLimit: {
-    type: Number,
-    default: 0,
-  },
-  jobRole: {
-    type: [String],
-    default: [],
-  },
-  packageOffered: {
-    type: [
-      {
-        role: String,
-        lpa: Number,
-        currency: { type: String, default: 'INR' },
-      },
-    ],
-    default: [],
-  },
-  website: String,
-  industry: String,
-  location: String,
-  contactPerson: String,
-  contactEmail: String,
-  contactPhone: String,
-  description: String,
-  createdAt: {
-    type: Date,
-    default: Date.now,
-  },
-  updatedAt: {
-    type: Date,
-    default: Date.now,
-  },
-});
+  package: { type: String, default: '' }, // e.g., '6.5 LPA'
+  date: { type: Date, default: Date.now },
+  deadline: { type: Date },
+  registrations: [{ type: mongoose.Schema.Types.ObjectId, ref: 'Student' }],
+  isActive: { type: Boolean, default: true }
+}, { timestamps: true });
 
-const Company = mongoose.model('Company', CompanySchema);
+const Company = mongoose.model('Company', companySchema);
 export default Company;

@@ -1,233 +1,127 @@
 import Student from '../models/Student.js';
-import { calculatePlacementProbability } from '../utils/helpers.js';
-import { mockDB, generateId } from '../config/mockDB.js';
 
 export const createStudent = async (req, res) => {
   try {
-    const { userId, rollNumber, department, ...studentData } = req.body;
-
-    // Validate required fields
-    if (!userId || !rollNumber || !department) {
-      return res.status(400).json({ message: 'userId, rollNumber, and department are required' });
-    }
-
-    // Validate CGPA if provided
-    if (studentData.cgpa && (studentData.cgpa < 0 || studentData.cgpa > 10)) {
-      return res.status(400).json({ message: 'CGPA must be between 0 and 10' });
-    }
-
-    try {
-      // Check if student already exists
-      const existingStudent = await Student.findOne({ rollNumber });
-      if (existingStudent) {
-        return res.status(400).json({ message: 'Student with this roll number already exists' });
-      }
-
-      // Create student object with all provided data
-      const student = new Student({
-        userId,
-        rollNumber,
-        department,
-        ...studentData,
-        placementEligible: (studentData.cgpa || 0) >= 6.0,
-      });
-
-      // Calculate placement probability and set eligibility band
-      const prediction = calculatePlacementProbability(student);
-      student.predictedPlacementProbability = prediction.probability;
-      student.eligibilityBand = prediction.band;
-      
-      await student.save();
-
-      return res.status(201).json({
-        message: 'Student record created successfully',
-        student: {
-          ...student.toObject(),
-          eligibilityBand: prediction.band,
-          eligible: prediction.eligible,
-        },
-      });
-    } catch (mongoError) {
-      // Fall back to mock DB
-      const existingStudent = mockDB.students.find(s => s.rollNumber === rollNumber);
-      if (existingStudent) {
-        return res.status(400).json({ message: 'Student with this roll number already exists' });
-      }
-
-      // Calculate prediction
-      const tempStudent = {
-        ...studentData,
-        cgpa: studentData.cgpa || 0,
-      };
-      const prediction = calculatePlacementProbability(tempStudent);
-
-      const student = {
-        _id: generateId(),
-        userId,
-        rollNumber,
-        department,
-        ...studentData,
-        placementEligible: (studentData.cgpa || 0) >= 6.0,
-        placementStatus: 'not_placed',
-        predictedPlacementProbability: prediction.probability,
-        eligibilityBand: prediction.band,
-        createdAt: new Date(),
-        updatedAt: new Date(),
-      };
-
-      mockDB.students.push(student);
-
-      return res.status(201).json({
-        message: 'Student record created successfully (Demo Mode)',
-        student: {
-          ...student,
-          eligible: prediction.eligible,
-        },
-      });
-    }
-  } catch (error) {
-    res.status(500).json({ message: 'Internal server error', error: error.message });
+    const student = await Student.create(req.body);
+    res.status(201).json({ message: 'Student created', student });
+  } catch (err) {
+    res.status(500).json({ message: 'Error creating student', error: err.message });
   }
 };
 
-export const getStudentData = async (req, res) => {
+export const getStudents = async (req, res) => {
   try {
-    const { studentId } = req.params;
+    const { status, email, search, page = 1, limit = 10 } = req.query;
+    const filter = {};
+    if (status) filter.placementStatus = status;
+    if (email) filter.email = email;
+    if (search) filter.name = { $regex: search, $options: 'i' };
 
-    try {
-      const student = await Student.findById(studentId);
-      if (!student) {
-        return res.status(404).json({ message: 'Student not found' });
-      }
-      return res.json(student);
-    } catch (mongoError) {
-      // Fall back to mock DB
-      const student = mockDB.students.find(s => s._id === studentId);
-      if (!student) {
-        return res.status(404).json({ message: 'Student not found' });
-      }
-      return res.json(student);
-    }
-  } catch (error) {
-    res.status(500).json({ message: 'Internal server error', error: error.message });
+    const students = await Student.find(filter)
+      .sort({ createdAt: -1 })
+      .skip((page - 1) * limit)
+      .limit(Number(limit));
+    const total = await Student.countDocuments(filter);
+    res.json({ students, total, page: Number(page), pages: Math.ceil(total / limit) });
+  } catch (err) {
+    res.status(500).json({ message: 'Error fetching students', error: err.message });
   }
 };
 
-export const updateStudentData = async (req, res) => {
+export const getStudent = async (req, res) => {
   try {
-    const { studentId } = req.params;
-    const updateData = req.body;
-
-    try {
-      const student = await Student.findByIdAndUpdate(studentId, updateData, {
-        new: true,
-        runValidators: true,
-      });
-
-      if (!student) {
-        return res.status(404).json({ message: 'Student not found' });
-      }
-
-      student.predictedPlacementProbability = calculatePlacementProbability(student);
-      await student.save();
-
-      return res.json({
-        message: 'Student data updated successfully',
-        student,
-      });
-    } catch (mongoError) {
-      // Fall back to mock DB
-      const studentIndex = mockDB.students.findIndex(s => s._id === studentId);
-      if (studentIndex === -1) {
-        return res.status(404).json({ message: 'Student not found' });
-      }
-
-      const student = { ...mockDB.students[studentIndex], ...updateData, updatedAt: new Date() };
-      student.predictedPlacementProbability = calculatePlacementProbability(student);
-      mockDB.students[studentIndex] = student;
-
-      return res.json({
-        message: 'Student data updated successfully (Demo)',
-        student,
-      });
-    }
-  } catch (error) {
-    res.status(500).json({ message: 'Internal server error', error: error.message });
+    const student = await Student.findById(req.params.id);
+    if (!student) return res.status(404).json({ message: 'Student not found' });
+    res.json({ student });
+  } catch (err) {
+    res.status(500).json({ message: 'Error fetching student', error: err.message });
   }
 };
 
-export const getAllStudents = async (req, res) => {
+export const updateStudent = async (req, res) => {
   try {
-    try {
-      const students = await Student.find().populate('userId', 'name email');
-      return res.json(students);
-    } catch (mongoError) {
-      // Fall back to mock DB
-      return res.json(mockDB.students);
-    }
-  } catch (error) {
-    res.status(500).json({ message: 'Internal server error', error: error.message });
-  }
-};
-
-export const getEligibleStudents = async (req, res) => {
-  try {
-    try {
-      const students = await Student.find({ placementEligible: true }).populate('userId', 'name email');
-      return res.json(students);
-    } catch (mongoError) {
-      // Fall back to mock DB
-      const students = mockDB.students.filter(s => s.placementEligible);
-      return res.json(students);
-    }
-  } catch (error) {
-    res.status(500).json({ message: 'Internal server error', error: error.message });
+    const student = await Student.findByIdAndUpdate(
+      req.params.id,
+      req.body,
+      { new: true, runValidators: true }
+    );
+    if (!student) return res.status(404).json({ message: 'Student not found' });
+    res.json({ message: 'Student updated', student });
+  } catch (err) {
+    res.status(500).json({ message: 'Error updating student', error: err.message });
   }
 };
 
 export const deleteStudent = async (req, res) => {
   try {
-    const { studentId } = req.params;
-
-    try {
-      const student = await Student.findByIdAndDelete(studentId);
-      if (!student) {
-        return res.status(404).json({ message: 'Student not found' });
-      }
-      return res.json({ message: 'Student deleted successfully' });
-    } catch (mongoError) {
-      // Fall back to mock DB
-      const index = mockDB.students.findIndex(s => s._id === studentId);
-      if (index === -1) {
-        return res.status(404).json({ message: 'Student not found' });
-      }
-      mockDB.students.splice(index, 1);
-      return res.json({ message: 'Student deleted successfully (Demo)' });
-    }
-  } catch (error) {
-    res.status(500).json({ message: 'Internal server error', error: error.message });
+    const student = await Student.findByIdAndDelete(req.params.id);
+    if (!student) return res.status(404).json({ message: 'Student not found' });
+    res.json({ message: 'Student deleted' });
+  } catch (err) {
+    res.status(500).json({ message: 'Error deleting student', error: err.message });
   }
 };
 
-export const getMyStudentProfile = async (req, res) => {
+export const predictPlacement = async (req, res) => {
   try {
-    const userId = req.user.id;
+    const { cgpa = 0, skills = [], internships = 0, projects = 0, tenthPercentage = 60, twelfthPercentage = 60, communicationLevel = 5 } = req.body;
+    
+    const cgScore       = Math.min(parseFloat(cgpa) / 10, 1) * 35;
+    const skillScore    = Math.min(skills.length / 5, 1) * 20;
+    const internScore   = Math.min(parseInt(internships) / 2, 1) * 15;
+    const projScore     = Math.min(parseInt(projects) / 3, 1) * 15;
+    const commScore     = (parseInt(communicationLevel) / 10) * 15;
+    
+    const probability = Math.round(cgScore + skillScore + internScore + projScore + commScore);
+    const eligible = probability >= 60;
 
-    try {
-      const student = await Student.findOne({ userId }).populate('userId', 'name email');
-      if (!student) {
-        return res.status(404).json({ message: 'Student profile not found' });
-      }
-      return res.json(student);
-    } catch (mongoError) {
-      // Fall back to mock DB
-      const student = mockDB.students.find(s => s.userId === userId);
-      if (!student) {
-        return res.status(404).json({ message: 'Student profile not found' });
-      }
-      return res.json(student);
+    const skillGaps = [];
+    if (parseFloat(cgpa) < 7.5) skillGaps.push({ item: 'CGPA', detail: 'Aim for 7.5+', type: 'warning' });
+    if (skills.length < 3) skillGaps.push({ item: 'Skills', detail: 'Learn more tech stacks', type: 'error' });
+    if (parseInt(internships) === 0) skillGaps.push({ item: 'Internships', detail: 'Gain industry exposure', type: 'error' });
+
+    res.json({
+      probability,
+      eligible,
+      status: eligible ? 'Likely to be Placed' : 'Needs Improvement',
+      skillGaps,
+      suggestions: skillGaps.map(g => `Improve ${g.item}: ${g.detail}`)
+    });
+  } catch (err) {
+    res.status(500).json({ message: 'Prediction failed', error: err.message });
+  }
+};
+
+export const bulkInsertStudents = async (req, res) => {
+  try {
+    const { students } = req.body; // Array of student objects
+    if (!Array.isArray(students)) return res.status(400).json({ message: 'Students array required' });
+
+    const result = await Student.insertMany(students);
+    res.status(201).json({ message: `${result.length} students inserted successfuly`, count: result.length });
+  } catch (err) {
+    console.error('Bulk insert error:', err);
+    res.status(500).json({ message: 'Bulk insert failed', error: err.message });
+  }
+};
+
+export const updatePlacementStatus = async (req, res) => {
+  try {
+    const { id } = req.params;
+    const { status, companyPlaced } = req.body; // e.g., 'placed', 'not_placed', 'applied'
+
+    if (!['not_applied', 'applied', 'placed', 'not_placed', 'ai_needed'].includes(status)) {
+      return res.status(400).json({ message: 'Invalid placement status' });
     }
-  } catch (error) {
-    res.status(500).json({ message: 'Internal server error', error: error.message });
+
+    const student = await Student.findByIdAndUpdate(
+      id,
+      { placementStatus: status, companyPlaced: companyPlaced || '' },
+      { new: true }
+    );
+    if (!student) return res.status(404).json({ message: 'Student not found' });
+    res.json({ message: `Student status updated to ${status}`, student });
+  } catch (err) {
+    res.status(500).json({ message: 'Status update failed', error: err.message });
   }
 };

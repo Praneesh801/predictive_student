@@ -2,66 +2,66 @@ import express from 'express';
 import cors from 'cors';
 import helmet from 'helmet';
 import dotenv from 'dotenv';
-import { connectDB } from './config/db.js';
+import path from 'path';
+import { fileURLToPath } from 'url';
+import fs from 'fs';
 
-// Routes imports
+import connectDB from './config/db.js';
 import authRoutes from './routes/authRoutes.js';
-import userRoutes from './routes/userRoutes.js';
 import studentRoutes from './routes/studentRoutes.js';
-import placementRoutes from './routes/placementRoutes.js';
-import notificationRoutes from './routes/notificationRoutes.js';
 import analyticsRoutes from './routes/analyticsRoutes.js';
-import skillsRoutes from './routes/skillsRoutes.js';
-import academicRecordRoutes from './routes/academicRecordRoutes.js';
-import predictionRoutes from './routes/predictionRoutes.js';
+import resumeRoutes from './routes/resumeRoutes.js';
 import companyRoutes from './routes/companyRoutes.js';
-import placementDriveRoutes from './routes/placementDriveRoutes.js';
-import applicationRoutes from './routes/applicationRoutes.js';
 
 dotenv.config();
 
+const __filename = fileURLToPath(import.meta.url);
+const __dirname  = path.dirname(__filename);
+
+// Ensure uploads directory exists
+const uploadsDir = path.join(__dirname, '../uploads');
+if (!fs.existsSync(uploadsDir)) fs.mkdirSync(uploadsDir, { recursive: true });
+
 const app = express();
+const PORT = process.env.PORT || 5000;
 
-// Middleware
-app.use(helmet());
-app.use(cors());
-app.use(express.json());
-app.use(express.urlencoded({ extended: true }));
-
-// Connect to database
+// Connect to MongoDB
 connectDB();
 
+// Middleware
+app.use(helmet({ crossOriginResourcePolicy: false }));
+app.use(cors({
+  origin: ['http://localhost:3000', 'http://localhost:5173', 'http://127.0.0.1:5173'],
+  credentials: true
+}));
+app.use(express.json({ limit: '10mb' }));
+app.use(express.urlencoded({ extended: true, limit: '10mb' }));
+app.use('/uploads', express.static(uploadsDir));
+
 // Routes
-app.use('/api/auth', authRoutes);
-app.use('/api/users', userRoutes);
-app.use('/api/students', studentRoutes);
-app.use('/api/placements', placementRoutes);
-app.use('/api/notifications', notificationRoutes);
+app.use('/api/auth',      authRoutes);
+app.use('/api/students',  studentRoutes);
 app.use('/api/analytics', analyticsRoutes);
-app.use('/api/skills', skillsRoutes);
-app.use('/api/academic-records', academicRecordRoutes);
-app.use('/api/predictions', predictionRoutes);
+app.use('/api/resume',    resumeRoutes);
 app.use('/api/companies', companyRoutes);
-app.use('/api/placement-drives', placementDriveRoutes);
-app.use('/api/applications', applicationRoutes);
 
 // Health check
 app.get('/api/health', (req, res) => {
-  res.json({ status: 'Server is running' });
-});
-
-// Error handling middleware
-app.use((err, req, res, next) => {
-  console.error(err.stack);
-  res.status(500).json({ message: 'Internal server error', error: err.message });
+  res.json({ status: 'ok', time: new Date().toISOString(), port: PORT });
 });
 
 // 404 handler
 app.use((req, res) => {
-  res.status(404).json({ message: 'Route not found' });
+  res.status(404).json({ message: `Route ${req.originalUrl} not found` });
 });
 
-const PORT = process.env.PORT || 5000;
+// Global error handler
+app.use((err, req, res, next) => {
+  console.error('Error:', err);
+  res.status(err.status || 500).json({ message: err.message || 'Internal server error' });
+});
+
 app.listen(PORT, () => {
-  console.log(`Server running on port ${PORT}`);
+  console.log(`\n🚀 PSPA Backend Server running on http://localhost:${PORT}`);
+  console.log(`📊 API: http://localhost:${PORT}/api/health\n`);
 });

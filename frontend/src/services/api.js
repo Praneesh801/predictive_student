@@ -1,135 +1,49 @@
-import apiClient from './apiClient.js';
+import axios from 'axios';
 
-export const authService = {
-  register: async (userData) => {
-    const response = await apiClient.post('/auth/register', userData);
-    return response.data;
-  },
+const API = axios.create({ baseURL: '/api' });
 
-  login: async (credentials) => {
-    const response = await apiClient.post('/auth/login', credentials);
-    if (response.data.token) {
-      localStorage.setItem('token', response.data.token);
-      localStorage.setItem('user', JSON.stringify(response.data.user));
-    }
-    return response.data;
-  },
+// Attach token automatically
+API.interceptors.request.use(config => {
+  const token = localStorage.getItem('pspa_token');
+  if (token) config.headers.Authorization = `Bearer ${token}`;
+  return config;
+});
 
-  logout: () => {
-    localStorage.removeItem('token');
-    localStorage.removeItem('user');
-  },
+// Auth
+export const login    = (data) => API.post('/auth/login', data);
+export const register = (data) => API.post('/auth/register', data);
+export const getMe    = ()     => API.get('/auth/me');
 
-  getProfile: async () => {
-    const response = await apiClient.get('/users/profile');
-    return response.data;
-  },
-};
+// Students
+export const getStudents    = (params) => API.get('/students', { params });
+export const getStudent     = (id)     => API.get(`/students/${id}`);
+export const createStudent  = (data)   => API.post('/students', data);
+export const updateStudent  = (id, data) => API.put(`/students/${id}`, data);
+export const deleteStudent  = (id)     => API.delete(`/students/${id}`);
+export const predictPlacement = (data) => API.post('/students/predict', data);
 
-export const studentService = {
-  createStudent: async (studentData) => {
-    const response = await apiClient.post('/students', studentData);
-    return response.data;
-  },
+// Analytics
+export const getPlacementStats = () => API.get('/analytics/placement-stats');
+export const getStudentStats   = () => API.get('/analytics/student-stats');
 
-  getStudentData: async (studentId) => {
-    const response = await apiClient.get(`/students/${studentId}`);
-    return response.data;
-  },
+// Resume
+export const uploadResume = (formData, onProgress) =>
+  API.post('/resume/upload', formData, {
+    headers: { 'Content-Type': 'multipart/form-data' },
+    onUploadProgress: (e) => onProgress && onProgress(Math.round((e.loaded * 100) / e.total))
+  });
+export const scoreResumeText = (text, studentName) =>
+  API.post('/resume/score-text', { text, studentName });
+export const getResumes = () => API.get('/resume');
 
-  getMyProfile: async () => {
-    const response = await apiClient.get('/students/me/profile');
-    return response.data;
-  },
+// Admin Student Management
+export const bulkInsertStudents = (students) => API.post('/students/bulk', { students });
+export const updatePlacementStatus = (id, status, companyPlaced) => API.put(`/students/${id}/status`, { status, companyPlaced });
 
-  updateStudentData: async (studentId, data) => {
-    const response = await apiClient.put(`/students/${studentId}`, data);
-    return response.data;
-  },
+// Companies
+export const getCompanies = () => API.get('/companies');
+export const createCompany = (data) => API.post('/companies', data);
+export const registerForDrive = (companyId, studentId) => API.post('/companies/register', { companyId, studentId });
+export const deleteCompany = (id) => API.delete(`/companies/${id}`);
 
-  getAllStudents: async () => {
-    const response = await apiClient.get('/students');
-    return response.data;
-  },
-
-  getEligibleStudents: async () => {
-    const response = await apiClient.get('/students/eligible/list');
-    return response.data;
-  },
-};
-
-export const placementService = {
-  createPlacementRecord: async (recordData) => {
-    const response = await apiClient.post('/placements', recordData);
-    return response.data;
-  },
-
-  getPlacementRecord: async (recordId) => {
-    const response = await apiClient.get(`/placements/${recordId}`);
-    return response.data;
-  },
-
-  updatePlacementStatus: async (recordId, data) => {
-    const response = await apiClient.put(`/placements/${recordId}`, data);
-    return response.data;
-  },
-
-  getStudentPlacements: async (studentId) => {
-    const response = await apiClient.get(`/placements/student/${studentId}`);
-    return response.data;
-  },
-
-  getAllPlacementRecords: async () => {
-    const response = await apiClient.get('/placements');
-    return response.data;
-  },
-};
-
-export const notificationService = {
-  getNotifications: async (userId) => {
-    const response = await apiClient.get(`/notifications/user/${userId}`);
-    return response.data;
-  },
-
-  markAsRead: async (notificationId) => {
-    const response = await apiClient.put(`/notifications/${notificationId}/read`);
-    return response.data;
-  },
-
-  getUnreadNotifications: async (userId) => {
-    const response = await apiClient.get(`/notifications/user/${userId}/unread`);
-    return response.data;
-  },
-};
-
-export const analyticsService = {
-  getPlacementStats: async () => {
-    const response = await apiClient.get('/analytics/placement-stats');
-    return response.data;
-  },
-
-  getStudentStats: async () => {
-    const response = await apiClient.get('/analytics/student-stats');
-    return response.data;
-  },
-
-  getPredictionAccuracy: async () => {
-    const response = await apiClient.get('/analytics/prediction-accuracy');
-    return response.data;
-  },
-
-  getTrendAnalysis: async () => {
-    const response = await apiClient.get('/analytics/trend-analysis');
-    return response.data;
-  },
-
-  getCompanyStats: async () => {
-    const response = await apiClient.get('/analytics/company-stats');
-    return response.data;
-  },
-
-  getPlacementAnalytics: async () => {
-    const response = await apiClient.get('/analytics/placement-analytics');
-    return response.data;
-  },
-};
+export default API;
